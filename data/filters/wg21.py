@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
 
+# MPark.WG21
+#
+# Copyright Michael Park, 2022
+#
+# Distributed under the Boost Software License, Version 1.0.
+# (See accompanying file LICENSE.md or copy at http://boost.org/LICENSE_1_0.txt)
+
 import datetime
 import html
 import os.path
@@ -7,13 +14,35 @@ import panflute as pf
 import re
 
 embedded_md = re.compile('@@(.*?)@@|@(.*?)@')
+classes_with_embedded_md = ('cpp', 'default', 'diff', 'nasm', 'rust')
 stable_names = {}
+refs = {}
+headers = {}
+
+def wrap_elem(opening, elem, closing):
+    if isinstance(elem, pf.Div):
+        if elem.content and isinstance(elem.content[0], pf.Para):
+            elem.content[0].content.insert(0, opening)
+        else:
+            elem.content.insert(0, pf.Plain(opening))
+        if elem.content and isinstance(elem.content[-1], pf.Para):
+            elem.content[-1].content.append(closing)
+        else:
+            elem.content.append(pf.Plain(closing))
+    elif isinstance(elem, pf.Span):
+        elem.content.insert(0, opening)
+        elem.content.append(closing)
 
 def prepare(doc):
-    date = doc.get_metadata('date')
-    if date == 'today':
+    if doc.get_metadata('date') == 'today':
         doc.metadata['date'] = datetime.date.today().isoformat()
 
+    document = doc.get_metadata('document')
+    number = re.match("[PD]([0-9]+)R[0-9]+", document.upper())
+    if number is not None:
+        doc.metadata['number'] = number.group(1)
+    else:
+        pf.debug('mpark/wg21: document ', document, 'is in an unrecognized format')
     doc.metadata['pagetitle'] = pf.convert_text(
         pf.Plain(*doc.metadata['title'].content),
         input_format='panflute',
@@ -39,6 +68,22 @@ def prepare(doc):
     doc.metadata['highlighting-css'] = pf.MetaBlocks(
         pf.RawBlock(highlighting('html'), 'html'))
 
+    def collect_refs(elem, doc):
+        if not (isinstance(elem, pf.Div) and elem.identifier.startswith('ref-')):
+            return None
+
+        def find_urls(elem, doc):
+            if isinstance(elem, pf.Link):
+                urls.append(elem.url)
+            return None
+
+        urls = []
+        elem.walk(find_urls)
+        if len(urls) == 1:
+            refs[f'#{elem.identifier}'] = urls[0]
+
+    doc.walk(collect_refs)
+
 def finalize(doc):
     def init_code_elems(elem, doc):
         if isinstance(elem, pf.Header) and doc.format == 'latex':
@@ -49,7 +94,7 @@ def finalize(doc):
 
         # Mark code elements within colored divspan as default.
         if any(isinstance(elem, cls) for cls in [pf.Div, pf.Span]) and \
-           any(cls in elem.classes for cls in ['add', 'rm', 'ednote']):
+           any(cls in elem.classes for cls in ['add', 'rm', 'ednote', 'draftnote']):
             elem.walk(lambda elem, doc:
                 elem.classes.insert(0, 'default')
                 if any(isinstance(elem, cls) for cls in [pf.Code, pf.CodeBlock])
@@ -76,7 +121,7 @@ def finalize(doc):
         if 'raw' in elem.classes:
             return None
 
-        if not any(cls in elem.classes for cls in ['cpp', 'default', 'diff']):
+        if not any(cls in elem.classes for cls in classes_with_embedded_md):
             return None
 
         code_elems.append(elem)
@@ -206,7 +251,7 @@ def finalize(doc):
         if 'raw' in elem.classes:
             return None
 
-        if not any(cls in elem.classes for cls in ['cpp', 'default', 'diff']):
+        if not any(cls in elem.classes for cls in classes_with_embedded_md):
             return None
 
         return convert(*next(converted))
@@ -221,8 +266,10 @@ def header(elem, doc):
     if elem.identifier == 'bibliography':
         elem.classes.remove('unnumbered')
 
-    elem.content.append(
-        pf.Link(url='#{}'.format(elem.identifier), classes=['self-link']))
+    url = f'#{elem.identifier}'
+    headers[url] = pf.stringify(elem)
+
+    elem.content.append(pf.Link(url=url, classes=['self-link']))
 
 def divspan(elem, doc):
     """
@@ -250,28 +297,18 @@ def divspan(elem, doc):
     > The return type is `decltype(`_e_(`m`)`)` [for the first form]{.add}.
     """
 
-    def _wrap(opening, closing):
-        if isinstance(elem, pf.Div):
-            if elem.content and isinstance(elem.content[0], pf.Para):
-                elem.content[0].content.insert(0, opening)
-            else:
-                elem.content.insert(0, pf.Plain(opening))
-            if elem.content and isinstance(elem.content[-1], pf.Para):
-                elem.content[-1].content.append(closing)
-            else:
-                elem.content.append(pf.Plain(closing))
-        elif isinstance(elem, pf.Span):
-            elem.content.insert(0, opening)
-            elem.content.append(closing)
-
     def _color(html_color):
-        _wrap(pf.RawInline('{{\\color[HTML]{{{}}}'.format(html_color), 'latex'),
-              pf.RawInline('}', 'latex'))
-        elem.attributes['style'] = 'color: #{}'.format(html_color)
+        wrap_elem(
+            pf.RawInline(f'{{\\color[HTML]{{{html_color}}}', 'latex'),
+            elem,
+            pf.RawInline('}', 'latex'))
+        elem.attributes['style'] = f'color: #{html_color}'
 
     def _nonnormative(name):
-        _wrap(pf.Span(pf.Str('[ '), pf.Emph(pf.Str('{}:'.format(name.title()))), pf.Space),
-              pf.Span(pf.Str(' — '), pf.Emph(pf.Str('end {}'.format(name.lower()))), pf.Str(' ]')))
+        wrap_elem(
+            pf.Span(pf.Str('[ '), pf.Emph(pf.Str(f'{name.title()}:')), pf.Space),
+            elem,
+            pf.Span(pf.Str(' — '), pf.Emph(pf.Str(f'end {name.lower()}')), pf.Str(' ]')))
 
     def _diff(color, latex_tag, html_tag):
         if isinstance(elem, pf.Span):
@@ -281,23 +318,27 @@ def divspan(elem, doc):
                                    elem,
                                    pf.RawInline('}', 'latex'))
             elem.walk(protect_code)
-            _wrap(pf.RawInline('\\{}{{'.format(latex_tag), 'latex'),
-                  pf.RawInline('}', 'latex'))
-            _wrap(pf.RawInline('<{}>'.format(html_tag), 'html'),
-                  pf.RawInline('</{}>'.format(html_tag), 'html'))
+            wrap_elem(
+                pf.RawInline(f'\\{latex_tag}{{', 'latex'),
+                elem,
+                pf.RawInline('}', 'latex'))
+            wrap_elem(
+                pf.RawInline(f'<{html_tag}>', 'html'),
+                elem,
+                pf.RawInline(f'</{html_tag}>', 'html'))
         _color(doc.get_metadata(color))
 
     def pnum():
         num = pf.stringify(elem)
 
         if '.' in num:
-            num = '({})'.format(num)
+            num = f'({num})'
 
         if doc.format == 'latex':
-            return pf.RawInline('\\pnum{{{}}}'.format(num), 'latex')
+            return pf.RawInline(f'\\pnum{{{num}}}', 'latex')
         elif doc.format == 'html':
             return pf.Span(
-                pf.RawInline('<a class="marginalized">{}</a>'.format(num), 'html'),
+                pf.RawInline(f'<a class="marginalized">{num}</a>', 'html'),
                 classes=['marginalizedparent'])
 
         return pf.Superscript(pf.Str(num))
@@ -305,7 +346,12 @@ def divspan(elem, doc):
     def example(): _nonnormative('example')
     def note():    _nonnormative('note')
     def ednote():
-        _wrap(pf.Str("[ Editor's note: "), pf.Str(' ]'))
+        wrap_elem(pf.Str("[ Editor's note: "), elem, pf.Str(' ]'))
+        _color('0000ff')
+    def draftnote():
+        audience = elem.attributes.get('audience')
+        text = 'Drafting note' + (f' for {audience}' if audience is not None else '')
+        wrap_elem(pf.Str(f'[ {text}: '), elem, pf.Str(' ]'))
         _color('0000ff')
 
     def add(): _diff('addcolor', 'uline', 'ins')
@@ -321,18 +367,19 @@ def divspan(elem, doc):
         target = pf.stringify(elem)
         number = stable_names.get(target)
         link = pf.Link(
-            pf.Str('[{}]'.format(target)),
-            url='https://wg21.link/{}'.format(target))
+            pf.Str(f'[{target}]'),
+            url=f'https://wg21.link/{target}')
         if number is not None:
-            return pf.Span(pf.Str(number), pf.Space(), link)
+            return pf.Span(link) if 'unnumbered' in elem.classes else pf.Span(pf.Str(number), pf.Space(), link)
         else:
             pf.debug('mpark/wg21: stable name', target, 'not found')
             return link
 
-    note_cls = next(iter(cls for cls in elem.classes if cls in {'example', 'note', 'ednote'}), None)
+    note_cls = next(iter(cls for cls in elem.classes if cls in {'example', 'note', 'ednote', 'draftnote'}), None)
     if note_cls == 'example':  example()
     elif note_cls == 'note':   note()
     elif note_cls == 'ednote': ednote(); return
+    elif note_cls == 'draftnote': draftnote(); return
 
     diff_cls = next(iter(cls for cls in elem.classes if cls in {'add', 'rm'}), None)
     if diff_cls == 'add':  add()
@@ -430,7 +477,7 @@ def cmptable(table, doc):
 
     header = pf.Null()
     caption = None
-    width = 0
+    width = 'ColWidthDefault'
 
     first_row = True
     table.content.append(pf.HorizontalRule())
@@ -446,23 +493,31 @@ def cmptable(table, doc):
 
             if first_row:
                 header = pf.Plain(*elem.content)
-                width = float(elem.attributes['width']) if 'width' in elem.attributes else 0
+                width = (float(elem.attributes['width'])
+                         if 'width' in elem.attributes else
+                         'ColWidthDefault')
             else:
                 warn(elem)
         elif isinstance(elem, pf.BlockQuote):
             if caption is not None:
                 warn(caption)
 
-            caption = elem
+            caption = pf.Caption(elem)
         elif isinstance(elem, pf.CodeBlock):
             if first_row:
                 headers.append(header)
                 widths.append(width)
 
                 header = pf.Null()
-                width = 0
+                width = 'ColWidthDefault'
 
-            examples.append(elem)
+            codeblock = pf.Div(elem)
+            wrap_elem(
+                pf.RawInline('\\begin{minipage}[t]{\\linewidth}\\raggedright', 'latex'),
+                codeblock,
+                pf.RawInline('\\end{minipage}', 'latex'));
+
+            examples.append(codeblock)
         elif isinstance(elem, pf.HorizontalRule) and examples:
             first_row = False
 
@@ -472,14 +527,11 @@ def cmptable(table, doc):
             warn(elem)
 
     if not all(isinstance(header, pf.Null) for header in headers):
-        kwargs['header'] = pf.TableRow(*[pf.TableCell(header) for header in headers])
+        kwargs['head'] = pf.TableHead(pf.TableRow(*[pf.TableCell(header) for header in headers]))
 
-    if caption is not None:
-        kwargs['caption'] = caption.content[0].content
-
-    kwargs['width'] = widths
-
-    return pf.Table(*rows, **kwargs)
+    kwargs['caption'] = pf.Caption() if caption is None else caption
+    kwargs['colspec'] = [('AlignDefault', w) for w in widths]
+    return pf.Table(pf.TableBody(*rows), **kwargs)
 
 def table(elem, doc):
     if not isinstance(elem, pf.Table):
@@ -490,12 +542,36 @@ def table(elem, doc):
             return None
 
         return pf.Div(
-            pf.Plain(pf.RawInline('\\centering', 'latex'),
+            pf.Plain(pf.RawInline('\\centering\\arraybackslash', 'latex'),
                      pf.Strong(*elem.content)),
             attributes={'style': 'text-align:center'})
 
-    if elem.header is not None:
-        elem.header.walk(header)
+    if elem.head is not None:
+        elem.head.walk(header)
+
+def citation_link(elem, doc):
+    if not (isinstance(elem, pf.Link) and elem.url.startswith("#ref-")):
+        return None
+
+    url = refs.get(elem.url)
+    if url is None:
+        return None
+
+    elem.url = url
+    return elem
+
+def automatic_header_link(elem, doc):
+    if not (isinstance(elem, pf.Link) and
+           elem.url.startswith('#') and
+           ('self-link' not in elem.classes) and
+           pf.stringify(elem) == ""):
+        return None
+
+    if (header_text := headers.get(elem.url)) is None:
+        pf.debug('mpark/wg21: cannot find automatic text for link to:', elem.url)
+        return None
+
+    return pf.Link(pf.Str(header_text), url=elem.url)
 
 if __name__ == '__main__':
   pf.run_filters([
@@ -504,4 +580,6 @@ if __name__ == '__main__':
       # after `cmptable` because...
       header, # doesn't apply to the "headers" in comparison table.
       table,  # also applies to tables generated by `cmptable`.
+      citation_link,
+      automatic_header_link,
   ], prepare, finalize)

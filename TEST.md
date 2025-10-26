@@ -1,14 +1,17 @@
 ---
 title: "Test document for mpark/wg21"
 subtitle: "Visual inspection of various features of the framework"
-document: D0000R0
+document: D0000R1
 date: today
 audience:
   - Library Evolution
   - Library
+revises: D0000R0
 author:
-  - name: Michael Park
-    email: <mcypark@gmail.com>
+  - name: Author 0
+    email: <author0@gmail.com>
+  - name: Author 1
+    email: <author1@gmail.com>
 toc: true
 toc-depth: 2
 ---
@@ -182,6 +185,25 @@ some things just don't change.
 - @_unspecified_@ detail::foo::template foo;
 ```
 
+### `rust` Syntax Highlighting
+
+```rust
+enum Result<T, E> {
+  Ok(T),
+  Err(E),
+}
+
+match parse(some_input) {
+  Ok(v) => // use `v`
+  Err(err) => // use `err`
+}
+```
+
+## Automatic Header Links {#auto-header-links}
+
+Automatic header links are written as `[](#auto-header-links)`{.markdown},
+and renders as [](#auto-header-links).
+
 # Comparison Tables
 
 ::: cmptable
@@ -210,7 +232,7 @@ inspect (x) {
 
 ::: cmptable
 
-### Before
+### Before {width=.6}
 ```cpp
 switch (x) {
   case 0: std::cout << "got zero"; break;
@@ -219,7 +241,7 @@ switch (x) {
 }
 ```
 
-### After
+### After {width=.4}
 ```cpp
 inspect (x) {
   0: std::cout << "got zero";
@@ -328,16 +350,58 @@ Small, inline changes are done with `[new text]{.add}` or `[old text]{.rm}`.
 # Stable Names
 
 Stable names are written as `[basic.life]{.sref}`, and renders as [basic.life]{.sref}.
-It uses <https://timsong-cpp.github.io/cppwp/annex-f>.
+You can also add a class `-` or `.unnumbered` to omit the section number.
+
+It uses <https://timsong-cpp.github.io/cppwp/annex-f> as the underlying database.
+
+Examples:
+
+  - `[basic.life]{.sref}` → [basic.life]{.sref}
+  - `[basic.life]{- .sref}` → [basic.life]{- .sref}
+  - `[basic.life]{.unnumbered .sref}` → [basic.life]{.unnumbered .sref}
+
+# Notes
+
+There are three supported styles of note:
+
+- Use the `note` class for notes that are expected to appear in the specification wording
+  ```
+  [Notes will look like this]{.note}
+  ```
+  [Notes will look like this]{.note}
+
+- Use the `ednote` for editorial notes, these will be formatted as
+  ```
+  [Editorial notes are important]{.ednote}
+  ```
+  [Editorial notes are important]{.ednote}
+
+- Use `draftnote` to include text that is intended as questions or information for reviews and
+  working groups.
+  ```
+  [Drafting notes can be used to provide comments for reviewers that are explicitly not to be
+   included in the specification.]{.draftnote}
+
+   [It is also possible to indicate the a note is for
+   a specific `audience` via this optional attribute.]{.draftnote audience="the reader"}
+  ```
+  [Drafting notes can be used to provide comments for reviewers that are explicitly not to be
+   included in the specification.]{.draftnote}
+
+  [It is also possible to indicate the a note is for
+   a specific `audience` via this optional attribute.]{.draftnote audience="the reader"}
 
 # Citation
 
 Automatic references are written as `[@N4762]` and renders as [@N4762].
 Anything in <https://wg21.link/index.yaml> are linked automatically.
 
-  - `N` Papers (e.g., `[@N3887]` [@N3887])
-  - `P` Papers (e.g., `[@P1371R1]` [@P1371R1])
-  - CWG Issues (e.g., `[@CWG1234]` [@CWG1234])
-  - LWG Issues (e.g., `[@LWG1234]` [@LWG1234])
-  - Github Edits (e.g, `[@EDIT1234]` [@EDIT1234])
-  - Standing Documents (e.g., `[@SD6]` [@SD6])
+  - `N` Papers (e.g., `[@N3887]` → [@N3887])
+  - `P` Papers (e.g., `[@P1371R1]` → [@P1371R1])
+  - CWG Issues (e.g., `[@CWG1234]` → [@CWG1234])
+  - LWG Issues (e.g., `[@LWG1234]` → [@LWG1234])
+  - Github Edits (e.g, `[@EDIT1234]` → [@EDIT1234])
+  - Standing Documents (e.g., `[@SD6]` → [@SD6])
+
+You may also write `[@P2996R8]{.title}`{.default} to include the title of the paper,
+and renders as: [@P2996R8]{.title}.
